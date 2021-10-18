@@ -1,0 +1,25 @@
+<project>
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>net.ypmania</groupId>
+  <artifactId>java-17-demos</artifactId>
+  <version>1</version>
+
+  <properties>
+     <maven.compiler.source>17</maven.compiler.source>
+     <maven.compiler.target>17</maven.compiler.target>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.typesafe.akka</groupId>
+      <artifactId>akka-stream_2.13</artifactId>
+      <version>2.6.16</version>
+    </dependency>
+    <dependency>
+      <groupId>io.vavr</groupId>
+      <artifactId>vavr</artifactId>
+      <version>0.10.4</version>
+    </dependency>
+  </dependencies>
+</project>

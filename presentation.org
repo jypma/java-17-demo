@@ -1,0 +1,624 @@
+
+* Recent new JDK features
+
+** Records (Java 16)
+Declare an immutable class with constructor, getters, =equals=, and =hashCode()=:
+
+#+BEGIN_SRC java
+record Point(int x, int y) { }
+#+END_SRC
+
+is equivalent to
+#+BEGIN_SRC java
+record Point(int x, int y) {
+    private final int x;
+    private final int y;
+
+    Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    int x() { return x; }
+    int y() { return y; }
+
+    @Override boolean equals(Object other) { ... }
+    @Override int hashCode() { ... }
+}
+#+END_SRC
+
+*** Demo
+
+This means that we can do
+#+BEGIN_SRC jshell
+record Point(int x, int y) {}
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+var p1 = new Point(1,2)
+#+END_SRC
+
+#+RESULTS:
+
+Use the getters:
+
+#+BEGIN_SRC jshell
+"P1 is at " + p1.x() + ", " + p1.y()
+#+END_SRC
+
+#+RESULTS:
+: "P1 is at 1, 2"
+
+Check for equality:
+
+#+BEGIN_SRC jshell
+"P1 is equal to itself: " + p1.equals(new Point(1,2))
+#+END_SRC
+
+#+RESULTS:
+: "P1 is equal to itself: true"
+
+*** Summary
+
+*Use cases*
+
+- Data Transfer Objects (API client or server, database input or results)
+- Nicer replacement of /tuples/ (method-local records are allowed)
+
+*Limitations*
+
+- Still no immutable collections to use as field types
+  + Use the [[https://www.vavr.io/][VAVR]] library instead, more about that later
+
+- No /copy/ constructor (apparently being worked on)
+  + Curiously, both Kotlin and Java allow this, using default arguments and a generated =copy= function:
+#+BEGIN_SRC scala
+val newPoint = p1.copy(x = 42)
+#+END_SRC
+
+** Sealed classes
+Interface or abstract class is marked as having a fixed set of implementations.
+*** Implemented in different source files
+
+#+BEGIN_SRC java
+package com.example.geometry;
+
+public abstract sealed class Shape
+    permits com.example.polar.Circle,
+            com.example.quad.Rectangle,
+            com.example.quad.simple.Square {
+  // ... Shape abstract implementation...
+}
+#+END_SRC
+
+*** Implemented in the same source file
+#+BEGIN_SRC jshell
+abstract sealed interface Shape {
+    record Circle(int diameter) implements Shape { /* ... */ }
+    record Box(int width, int height) implements Shape { /* ... */ }
+}
+#+END_SRC
+
+#+RESULTS:
+
+Each class implementing a =sealed= base can be either
+- =final= (sealing the hierarchy here. All =record= classes are =final=.)
+- =sealed= (implying further sub-types extending this one)
+- =non-sealed= (breaking the promise of this being a sealed hierarchy)
+
+*** Can't extend outside of what's sealed in
+
+#+BEGIN_SRC jshell
+class OtherShape implements Shape {
+
+}
+#+END_SRC
+
+#+RESULTS:
+: |  Error:
+: |  class is not allowed to extend sealed class: Shape (as it is not listed in its permits clause)
+: |  class OtherShape implements Shape {
+: |  ^----------------------------------...
+
+** "Pattern matching" for switch
+Adds a type check to =switch= branches.
+
+Let's recap and see how =switch= has evolved through recent Java versions.
+*** Switch in Java 7
+Simple replacement for =goto=, with mostly same semantics and syntax as =C=.
+
+#+BEGIN_SRC jshell
+int value = 5;
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+switch(value) {
+    case 1:
+        System.out.println("One");
+        break;
+    case 5:
+        System.out.println("five");
+        break;
+    default:
+        System.out.println("Unknown");
+}
+#+END_SRC
+
+#+RESULTS:
+: five
+*** Java 12: Strings, expressions
+#+BEGIN_SRC jshell
+String day = "Tuesday";
+#+END_SRC
+
+#+RESULTS:
+We can now switch on =String=, have multiple values in one branch, and return as an expression.
+
+*Note*: The following no longer compiles with Java 13+ (which requires =yield= instead of =break=).
+#+BEGIN_SRC jshell
+switch(day) {
+    case "Monday", "Tuesday":
+        break "Week day";
+
+    default:
+        break "Unknown";
+}
+#+END_SRC
+
+#+RESULTS:
+: |  Error:
+: |  ';' expected
+: |            break "Week day";
+: |                 ^
+: |  Error:
+: |  ';' expected
+: |            break "Unknown";
+: |                 ^
+
+*** Java 12: Arrows for expressions
+Instead of =break= or =yield=, arrows can be used to write a =switch= expression.
+
+#+BEGIN_SRC jshell
+switch(day) {
+    case "Monday", "Tuesday" -> "Week day";
+    default -> "Unknown";
+}
+#+END_SRC
+
+#+RESULTS:
+: "Week day"
+
+*** Java 13: Yield instead of break
+Here's the Java 13+ equivalent:
+
+#+BEGIN_SRC jshell
+switch(day) {
+    case "Monday", "Tuesday":
+        yield "Week day";
+
+    default:
+        yield "Unknown";
+}
+#+END_SRC
+
+#+RESULTS:
+: "Week day"
+
+*** Java 17: Pattern matching objects, and guards
+We can now check the type of an object, including additional constraints, right inside a =switch= case.
+
+#+BEGIN_SRC jshell
+Shape shape = new Shape.Box(10, 5)
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+switch(shape) {
+  case Shape.Circle c -> "It's a circle with diameter " + c.diameter();
+  case Shape.Box b && b.width() == b.height() -> "It's a square of size " + b.width();
+  case Shape.Box b -> "It's a box of size " + b.width() + " by " + b.height();
+}
+#+END_SRC
+
+#+RESULTS:
+: "It's a box of size 10 by 5"
+
+*** Exhaustiveness check
+Since we defined =Shape= as a =sealed= class, the compiler will now inform us if we forget to add a case.
+
+#+BEGIN_SRC jshell
+switch(shape) {
+  case Shape.Box b && b.width() == b.height() -> "It's a square of size " + b.width();
+  case Shape.Box b -> "It's a box of size " + b.width() + " by " + b.height();
+}
+
+#+END_SRC
+
+#+RESULTS:
+: |  Error:
+: |  the switch expression does not cover all possible input values
+: |  switch(shape) {
+: |  ^--------------...
+
+*** Case branch for null
+
+A case branch for =null= is now allowed (but, please, don't). And =default= still doesn't handle =null= (this is unchanged).
+
+(set this to non-null to compile the =switch= below)
+#+BEGIN_SRC jshell
+Object nothing = null;
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+switch (nothing) {
+    case null     -> "null!";
+    case String s -> "String";
+    default       -> "Something else";
+}
+#+END_SRC
+
+#+RESULTS:
+: "null!"
+
+** Shenandoah GC and ZGC
+- Parallel GC
+  + Stop-the-world GC for Young and Old generation
+- Concurrent Mark-Sweep GC
+  + Stop-the-world GC for Young, concurrent for Old generation
+  + No compaction of Old generation
+- G1 garbage collector
+  + Stop-the-world GC for Young, concurrent mark for Old generation, stop-the-world compaction in segments
+  + Configurable GC pauses: either shorter pauses, or less CPU wasted on GC
+  + Default since Java 9
+  + Problematic on large heaps or high allocation counts
+- ZGC and Shenandoah GC
+  + Scalable, low-latency GC
+  + No generations
+  + Concurrent mark /and/ compaction
+- ZGC
+  + Since Java 11, but only on 64-bit linux (no compressed pointers)
+  + Store objects in ZPages (small, medium, large), compact when almost all objects in a page are dead
+  + Clever x86 JVM pointer tricks (/colored/ pointers)
+  + More info on [[https://wiki.openjdk.java.net/display/ZGC][OpenJDK wiki]]
+- Shenandoah GC
+  + Developed by Red Hat
+  + Since Java 12 (but not in Oracle builds), but backported to 11 and 8
+  + Architecture independent (windows, linux and macOS)
+  + Derived from G1 (same marking), but divides heap into (many) /regions/
+  + Metadata in JVM object header
+  + More info on [[https://wiki.openjdk.java.net/display/shenandoah/Main#Main-ImplementationOverview][OpenJDK wiki]]
+- So which one should I use?
+  + Both ZGC and Shenandoah will probably improve your latencies
+  + Try both!
+** macOS / AArch64 port
+
+- Recent apple computers have 64-bit ARM processors, but don't run Linux
+- There already was an =aarch64= port for Linux
+- Java 17 brings native support for =aarch64= under MacOS
+
+* Practical reactive streams
+
+** Reactive manifesto
+
+- [[https://www.reactivemanifesto.org/][Published]] in 2014, intends to push software systems to be better-behaved.
+
+  + *Responsive*: /The system responds in a timely manner if at all possible./
+  + *Resilient*: /The system stays responsive in the face of failure./
+  + *Elastic*: /The system stays responsive under varying workload./
+  + *Message driven*: /Establish a boundary between components that ensures loose coupling, isolation and location transparency./
+
+** Concurrency
+
+*** Primitives
+
+- Threads (synchronous method calls)
+  + Hard to make /responsive/ (can't really abort a thread, unless all code constantly checks time)
+  + Hard to make /resilient/ in Java (failure is realistically limited to exceptions, of which many are unchecked and invisible)
+  + Not /message-driven/ (methods return values synchronously, and/or have side effects)
+
+- [[https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html][Futures]] (=CompletionStage<T>,= =CompletableFuture<T>,=)
+  + Handle to an on-going background computation
+  + Hard to make /responsive/ (computation already started, not cancellable in practice)
+  + Even harder than Threads to make /resilient/ in Java (exceptions are now hidden behind =CompletionException=, plus cancellation)
+  + Can model /message-driven/ by having future callbacks
+
+- Functional effect systems
+  + Description of (not yet started) background computation
+  + All of /responsive/, /elastic/ (since description can be altered before launch) and /message-driven/
+  + Very active in the Scala world (=cats-effect=, =ZIO=)
+  + Not so much in plain Java or Kotlin, potentially due to missing language constructs
+
+- Reactive streams
+  + Covers a variety of independent frameworks
+    * /rxJava/ (2014), porting Microsoft's "reactive extensions" to Java
+    * /Akka Streams/ (2015), building on Akka with a component-based streaming framework
+    * /Project Reactor/ (2015), built by Spring directly decorating =java.util.concurrent.Flow=
+    * Many others
+  + Interoperability through =java.util.concurrent.Flow=
+    * Low-level
+  + We'll look at Akka Streams today
+
+*** Directness and laziness
+
+- Direct value: =Person p=
+  + Value is already calculated
+  + This is good, we know there's no more I/O
+
+- Direct asynchronous value: =CompletionStage<Person> p=
+  + Computation already in progress: problematic
+
+- Lazy value: =Supplier<Person> p=
+  + Computation doesn't start until invoking =p.get()=
+  + Nice, but not asynchronous
+
+- Lazy asynchronous value: (no plain Java type) "=Supplier<CompletionStage<Person>> p="
+  + All /Akka Streams/ types are lazy and asynchronous (but multi-valued)
+  + Hence, Akka can optimize and change a stream before starting it
+
+** Immutability
+- Asynchronous processing on data needs guarantees
+  + Locks? Not if each and every data object is processed concurrently.
+- /"I promise I won't change this object anymore"/ just isn't cutting it
+- Need actual immutability
+  + Have compiler help guaranteeing objects won't be changed
+  + No setters
+  + =record= anyone?
+  + Can't use =java.util.List= or =java.util.Map=
+
+*** VAVR
+- [[https://docs.vavr.io/][Functional library]] for Java, focusing on immutable values
+- [[https://www.javadoc.io/doc/io.vavr/vavr/latest/index.html][JavaDoc]] shows collection, control and concurrency primitives
+
+Create an immutable sequence:
+#+BEGIN_SRC jshell
+Seq<Integer> seq = Vector.of(1, 2, 3)
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+seq.forEach(i -> System.out.println(i))
+#+END_SRC
+
+#+RESULTS:
+: 1
+: 2
+: 3
+
+- All VAVR collections are /persistent data structures/, for example
+  - =List= (single-linked list)
+  - =Vector= (bit-mapped trie)
+  - =HashMap= (hash array mapped trie)
+
+** Null-free style
+
+- Nobody likes =NullPointerException=
+
+- Reactive streams, and most functional libraries, don't allow (or like) =null= as values
+
+- So, why are we still using =null= to indicate optionality?
+  + Use =java.util.Optional= or the more powerful =io.vavr.control.Option= (or =io.vavr.control.Either=) instead.
+#+BEGIN_SRC java
+Option<User> getUserIfExists(userId: long) {
+  // ...
+}
+#+END_SRC
+
+  + In case of optional method arguments, consider method overloading instead of passing =null= (but =Option= is also fine here).
+#+BEGIN_SRC java
+void saveUser(String userName, String petName) {
+ // Save a user who signed up together with their pet.
+}
+
+void saveUser(String userName) {
+ // Save a user who signed up by themselves.
+}
+#+END_SRC
+
+- In short
+  + The word =null= should never occur in your pull requests for new code
+  + Only exception is interacting with external =null=-loving libraries
+
+** TODO Functional style
+
+ introduce this earlier or skip it.
+
+  - Value Objects (data) vs. "other business logic" (objects)
+Article about data objects [[https://www.tedinski.com/2018/01/23/data-objects-and-being-railroaded-into-misdesign.html][here]]
+
+No place for "Entity" (since it's mutable) or an ORM
+
+** Akka streams introduction
+- *Akka Streams*: Composable reactive streams framework
+- Implemented on top of Akka /actors/ (but invisibly so). You need an =ActorSystem= to launch streams:
+#+BEGIN_SRC jshell
+ActorSystem system = ActorSystem.create("Demo")
+#+END_SRC
+
+#+RESULTS:
+
+- Streams form a graph, built using components called /graph stages/
+  + Type-safe /input(s)/ and/or /output(s)/
+  + Number of inputs and outputs defines its /shape/
+- Stream objects are descriptions only, and need to be /materialized/ to actually do something
+
+*** Source
+[[file:source.gif]]
+
+- Has a single output of type =T=, no inputs
+- Emits elements
+
+For example, a source that emits the same element every second:
+#+BEGIN_SRC jshell
+Source<String,Cancellable> everySecond = Source.tick(Duration.ofSeconds(1), Duration.ofSeconds(1), "tick!")
+#+END_SRC
+
+#+RESULTS:
+
+Or a source that emits all integers up to one million, as fast as the stream can use them:
+#+BEGIN_SRC jshell
+Source<Integer,NotUsed> integers = Source.range(1, 1000000)
+#+END_SRC
+
+#+RESULTS:
+
+*** Flow
+[[file:flow.gif]]
+
+- Has a single input of type =T=, and one output of type =U=
+- Typically emits elements on its output as it receives them in the input
+
+For example, a flow that converts integers to strings:
+#+BEGIN_SRC jshell
+Flow<Integer,String,NotUsed> intToString = Flow.<Integer>create().
+  map(i -> i.toString())
+#+END_SRC
+
+#+RESULTS:
+
+But we have more complex, useful operators. For example, process a sliding window of 10 elements:
+#+BEGIN_SRC jshell
+Flow<Integer, Seq<Integer>, NotUsed> intSliding = Flow.<Integer>create().
+  sliding(1, 10).
+  map(Vector::ofAll) // Use VAVR to show immutability
+#+END_SRC
+
+#+RESULTS:
+: Flow<Integer, Seq<Integer>, NotUsed> intSliding = Flow.<Integer>create().
+: sliding(1, 10).
+: map(Vector::ofAll)
+
+Or, group elements up to a certain count, /OR/ until some time has elapsed:
+#+BEGIN_SRC jshell
+Flow<Integer, Seq<Integer>, NotUsed> intGrouped = Flow.<Integer>create().
+  groupedWithin(256, Duration.ofSeconds(1)).
+  map(Vector::ofAll) // Use VAVR to show immutability
+#+END_SRC
+
+#+RESULTS:
+: Flow<Integer, Seq<Integer>, NotUsed> intGrouped = Flow.<Integer>create().
+: groupedWithin(256, Duration.ofSeconds(1)).
+: map(Vector::ofAll)
+
+*** Flow (connecting)
+- Connecting a =Flow= to a =Source= (of compatible type) can be viewed as a =Source= (of the Flow's output type)
+
+For example, let's hook up our =integers= source to the =intToString= flow:
+#+BEGIN_SRC jshell
+Source<String,NotUsed> strings = integers.via(intToString)
+#+END_SRC
+
+#+RESULTS:
+
+In order to test, let's print the first 10 elements which that flow produces.
+#+BEGIN_SRC jshell
+strings.
+  take(10).
+  runForeach(System.out::println, system).
+  toCompletableFuture().get(1, TimeUnit.SECONDS)
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Done
+#+end_example
+
+
+*** Sink
+
+- Connecting a =Source= to a =Sink= leaves no inputs or outputs
+  + Akka calls this a =RunnableGraph=
+
+*** Back-pressure
+
+*** Materialization
+
+- Instances of graphs (=Source=, =Sink=, ...) are /descriptions/, and don't run yet
+- Need to invoke =RunnableGraph.run()= to actually start a stream
+
+** Case: Kafka processing with Akka Streams
+
+** Case: RabbitMQ processing with Akka Streams
+
+* JShell tests
+
+#+BEGIN_SRC jshell
+1 + 1
+#+END_SRC
+
+#+RESULTS:
+: 2
+
+#+BEGIN_SRC jshell
+1 + foobar
+#+END_SRC
+
+#+RESULTS:
+: |  Error:
+: |  cannot find symbol
+: |    symbol:   variable foobar
+: |  1 + foobar
+: |      ^----^
+
+
+#+BEGIN_SRC jshell
+int f() {
+  for (int i = 0; i < 5; i++) {
+    System.out.println("Hello");
+  }
+  return 42;
+}
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+f()
+#+END_SRC
+
+#+RESULTS:
+: Hello
+: Hello
+: Hello
+: Hello
+: Hello
+:
+: 42
+
+#+BEGIN_SRC jshell
+int f() {
+  foobar;
+  int bar;
+  for (int i = 0; i < 16 i++) {
+    int what;
+  }
+}
+#+END_SRC
+
+#+RESULTS:
+: |  Error:
+: |  not a statement
+: |      foobar;
+: |      ^----^
+: |  Error:
+: |  ';' expected
+: |      for (int i = 0; i < 16 i++) {
+: |                            ^
