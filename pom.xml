@@ -8,18 +8,36 @@
   <properties>
      <maven.compiler.source>17</maven.compiler.source>
      <maven.compiler.target>17</maven.compiler.target>
+     <akka.version>2.6.15</akka.version>
+     <jackson.version>2.11.4</jackson.version>
+     <scala.binary.version>2.13</scala.binary.version>
   </properties>
 
   <dependencies>
     <dependency>
       <groupId>com.typesafe.akka</groupId>
-      <artifactId>akka-stream_2.13</artifactId>
-      <version>2.6.16</version>
+      <artifactId>akka-stream-kafka_${scala.binary.version}</artifactId>
+      <version>2.1.1</version>
+    </dependency>
+    <dependency>
+      <groupId>com.lightbend.akka</groupId>
+      <artifactId>akka-stream-alpakka-amqp_${scala.binary.version}</artifactId>
+      <version>3.0.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.typesafe.akka</groupId>
+      <artifactId>akka-stream_${scala.binary.version}</artifactId>
+      <version>${akka.version}</version>
     </dependency>
     <dependency>
       <groupId>io.vavr</groupId>
       <artifactId>vavr</artifactId>
       <version>0.10.4</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j-impl</artifactId>
+      <version>2.14.1</version>
     </dependency>
   </dependencies>
 </project>

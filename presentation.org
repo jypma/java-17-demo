@@ -1,3 +1,6 @@
+#+TITLE: Functional JDK 17
+#+PROPERTY: header-args:java :noeval
+#+PROPERTY: header-args:scala :noeval
 
 * Recent new JDK features
 
@@ -149,7 +152,6 @@ switch(value) {
 #+END_SRC
 
 #+RESULTS:
-: five
 *** Java 12: Strings, expressions
 #+BEGIN_SRC jshell
 String day = "Tuesday";
@@ -361,6 +363,7 @@ switch (nothing) {
 - Lazy asynchronous value: (no plain Java type) "=Supplier<CompletionStage<Person>> p="
   + All /Akka Streams/ types are lazy and asynchronous (but multi-valued)
   + Hence, Akka can optimize and change a stream before starting it
+    * For example, adding retry behavior to stream components
 
 ** Immutability
 - Asynchronous processing on data needs guarantees
@@ -426,15 +429,6 @@ void saveUser(String userName) {
   + The word =null= should never occur in your pull requests for new code
   + Only exception is interacting with external =null=-loving libraries
 
-** TODO Functional style
-
- introduce this earlier or skip it.
-
-  - Value Objects (data) vs. "other business logic" (objects)
-Article about data objects [[https://www.tedinski.com/2018/01/23/data-objects-and-being-railroaded-into-misdesign.html][here]]
-
-No place for "Entity" (since it's mutable) or an ORM
-
 ** Akka streams introduction
 - *Akka Streams*: Composable reactive streams framework
 - Implemented on top of Akka /actors/ (but invisibly so). You need an =ActorSystem= to launch streams:
@@ -484,28 +478,24 @@ Flow<Integer,String,NotUsed> intToString = Flow.<Integer>create().
 #+RESULTS:
 
 But we have more complex, useful operators. For example, process a sliding window of 10 elements:
+/(we'll map to VAVR's =Vector= to ensure immutability)/
+
 #+BEGIN_SRC jshell
 Flow<Integer, Seq<Integer>, NotUsed> intSliding = Flow.<Integer>create().
   sliding(1, 10).
-  map(Vector::ofAll) // Use VAVR to show immutability
+  map(Vector::ofAll)
 #+END_SRC
 
 #+RESULTS:
-: Flow<Integer, Seq<Integer>, NotUsed> intSliding = Flow.<Integer>create().
-: sliding(1, 10).
-: map(Vector::ofAll)
 
 Or, group elements up to a certain count, /OR/ until some time has elapsed:
 #+BEGIN_SRC jshell
 Flow<Integer, Seq<Integer>, NotUsed> intGrouped = Flow.<Integer>create().
   groupedWithin(256, Duration.ofSeconds(1)).
-  map(Vector::ofAll) // Use VAVR to show immutability
+  map(Vector::ofAll)
 #+END_SRC
 
 #+RESULTS:
-: Flow<Integer, Seq<Integer>, NotUsed> intGrouped = Flow.<Integer>create().
-: groupedWithin(256, Duration.ofSeconds(1)).
-: map(Vector::ofAll)
 
 *** Flow (connecting)
 - Connecting a =Flow= to a =Source= (of compatible type) can be viewed as a =Source= (of the Flow's output type)
@@ -541,84 +531,338 @@ strings.
 Done
 #+end_example
 
-
 *** Sink
+[[file:sink.gif]]
+
+- Has a single input of type =T=
+- Typically "consumes" the elements
+#+BEGIN_SRC jshell
+Sink<String, CompletionStage<Done>> printStrings = Sink.<String>foreach(s -> System.out.println(s))
+#+END_SRC
+
+#+RESULTS:
 
 - Connecting a =Source= to a =Sink= leaves no inputs or outputs
   + Akka calls this a =RunnableGraph=
 
-*** Back-pressure
+#+BEGIN_SRC jshell
+RunnableGraph<NotUsed> graph = strings.to(printStrings)
+#+END_SRC
+
+#+RESULTS:
+
+- We won't run the above graph, since there's no =CompletionStage= indicating when it's done (only =NotUsed=)
 
 *** Materialization
 
 - Instances of graphs (=Source=, =Sink=, ...) are /descriptions/, and don't run yet
-- Need to invoke =RunnableGraph.run()= to actually start a stream
+- Need to invoke =RunnableGraph.run()= (or one of the shorthands on =Source=) to actually start a stream
+- Running a stream gives a /materialized value/
+  + =Source<T, M>.= emits elements of type =T=, results in a value =M= when started
+  + =Sink<T, M>.= consumes elements of type =T=, results in a value =M= when started
+  + =RunnableGraph<M>.= results in a value =M= when started (=.run()= returns =M=)
+
+- Now, we can construct =graph= again, but this time use the materialized value of the =sink=
+  + By default, =.to()= uses the materialized value of the =source=
+
+#+BEGIN_SRC jshell
+RunnableGraph<CompletionStage<Done>> graph = strings.take(10).toMat(printStrings, (sourceMat, sinkMat) -> sinkMat)
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+graph.run(system).toCompletableFuture().get(1, TimeUnit.SECONDS)
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Done
+#+end_example
+
+*** Bounded processing
+
+- When writing data processing software, always make sure to be explicit in how much /of each/ you want in memory
+
+- Akka makes this explicit wherever possible
+  + =groupedWithin= takes a maximum amount of elements AND a duration. There is no variant that only takes a duration.
+#+BEGIN_SRC java
+source.groupedWithin(100, Duration.ofSeconds(1))
+#+END_SRC
+  + =groupBy(Integer maxStreams, Function<T,K> key)= (grouping substreams by key) needs to specify the maximum number of open streams
+  + =mapAsync= (allowing to map each element to a =CompletionStage= 's result) needs to specify the number of in-flight elements
+
+- Akka helps you towards bounded processing
+
+*** Custom graph stages
+
+- Writing your own =Source=, =Flow= or =Sink= is easy and well-documented
+
+- These are ideal building blocks for data-processing systems
+  + Encapsulate resource handling inside your building block
+  + Well-defined error handling and propagation
+
+*** Use cases for reactive streams
+
+Good reasons to reach for reactive streams:
+
+  + Variance in iteration size
+    * Being able to handle, simultaneously, both /many small/ requests but also /few large/ requests with the same code
+
+  + Heterogeneous systems
+
+  + Predictable memory usage
 
 ** Case: Kafka processing with Akka Streams
 
+*** Preparation
+
+- Kafka is running locally, started from [[file:docker-compose.yml][docker-compose.yml]]
+
+- Let's make sure we have an empty topic to play with:
+#+BEGIN_SRC sh
+kafkactl delete topic demo 2>/dev/null
+kafkactl create topic demo
+#+END_SRC
+
+#+RESULTS:
+: topic created: demo
+
+- Akka can make use of Kafka through the [[https://doc.akka.io/docs/alpakka-kafka/current/home.html][Alpakka Kafka]] library
+
+*** Writing to a topic
+
+- Let's use akka's =Producer.plainSink= in a simple example
+
+#+BEGIN_SRC jshell
+void writeToTopic() throws Exception {
+    final ProducerSettings<String, String> producerSettings =
+        ProducerSettings.create(system, new StringSerializer(), new StringSerializer())
+        .withBootstrapServers("localhost:9092");
+
+    Source.range(1, 10)
+        .map(number -> number.toString())
+        .map(value -> new ProducerRecord<String, String>("demo", value))
+        .runWith(Producer.plainSink(producerSettings), system)
+        .toCompletableFuture().get(10, TimeUnit.SECONDS);
+}
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC jshell
+writeToTopic()
+#+END_SRC
+
+- Let's see if they arrived:
+#+BEGIN_SRC sh
+kafkactl consume demo --from-beginning --exit
+#+END_SRC
+
+#+RESULTS:
+|  1 |
+|  2 |
+|  3 |
+|  4 |
+|  5 |
+|  6 |
+|  7 |
+|  8 |
+|  9 |
+| 10 |
+
+*** Producer variants
+
+The Alpakka =Producer= class has [[https://doc.akka.io/docs/alpakka-kafka/current/producer.html#choosing-a-producer][several ways]] of defining a Kafka producer.
+
+- =Producer.plainSink=: Sends =ProducerMessage= objects to Kafka
+  + Suitable when sending to Kafka is the last step in a stream
+
+- =Producer.flexiFlow=: Sends =Envelope= to Kafka, and passes it on down-stream
+  + An =Envelope= can potentially contain more than one Kafka message, and an arbitrary /context/ object
+  + Useful when you need to do more after sending to Kafka
+
+- =Producer.committableSink=: Automatically /commits/ messages read from another Kafka topic
+  + Useful in /consume - process - produce/ type flows
+
+*** Consuming from a topic
+
+- Let's use the Alpakka =Consumer.plainSource= in a simple example
+
+#+BEGIN_SRC jshell
+Seq<String> readFromTopic() throws Exception {
+    final ConsumerSettings<String, String> consumerSettings =
+        ConsumerSettings.create(system, new StringDeserializer(), new StringDeserializer())
+        .withBootstrapServers("localhost:9092")
+        .withGroupId("group1")
+        .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+
+    return Consumer.plainSource(consumerSettings, Subscriptions.topics("demo"))
+        .take(1)
+        .map(record -> record.value())
+        .runWith(Sink.seq(), system)
+        .thenApply(Vector::ofAll)
+        .toCompletableFuture()
+        .get(20, TimeUnit.SECONDS);
+}
+#+END_SRC
+
+#+RESULTS:
+
+(demo is unfortunately not working due to  JShell limitations)
+#+BEGIN_SRC jshell
+readFromTopic()
+#+END_SRC
+
+#+RESULTS:
+
+*** Consumer offset management
+
+Kafka can store the offset for consumer groups, or consumers can provide (and store) it themselves.
+
+- Store offset in Kafka
+  + =Consumer.committableSource=
+
+- No offset management
+  + =Consumer.plainSource(settings, Subscriptions.topics("topic"))=
+
+- Do your own offset management
+  + =Consumer.plainSource(settings, Subscriptions.assignmentWithOffset(new TopicPartition("topic", partition0), fromOffset)))=
+  + After each element, store its partition and offset in your own storage
+
+*** Transactions and "exactly-once" processing
+
+- Recent Kafka versions implement an extension that allows clients to atomically
+  + Consume from one topic
+  + Produce results to another topic
+
+- Kafka refers to this both as /transactions/ and /exactly-one processing/
+
+- This feature can be used from Akka using the Alpakka =Transactional= class, e.g.
+#+BEGIN_SRC java
+Transactional.source(consumerSettings, Subscriptions.topics(sourceTopic))
+    .via(business())
+    .map(
+        msg ->
+        ProducerMessage.single(
+            new ProducerRecord<>(targetTopic, msg.record().key(), msg.record().value()),
+            msg.partitionOffset()))
+    .toMat(
+        Transactional.sink(producerSettings, transactionalId),
+        Consumer::createDrainingControl)
+    .run(system);
+#+END_SRC
+  + =PartitionOffset= holds the partition number and offset of the originally consumed message
+  + This is passed as /context/ argument to the =ProducerRecord=
+
 ** Case: RabbitMQ processing with Akka Streams
 
-* JShell tests
+*** Preparation
+
+- RabbitMQ is running locally, started from [[file:docker-compose.yml][docker-compose.yml]]
+
+- Communication is over AMQP, using akka's [[https://doc.akka.io/docs/alpakka/current/amqp.html][Alpakka AMQP]] library
+
+*** Writing to a topic
 
 #+BEGIN_SRC jshell
-1 + 1
-#+END_SRC
+Seq<WriteResult> writeToTopic() throws Exception {
+    var settings = AmqpWriteSettings.create(AmqpLocalConnectionProvider.getInstance())
+        .withRoutingKey("demo-queue")
+        .withDeclaration(QueueDeclaration.create("demo-queue"))
+        .withBufferSize(10)
+        .withConfirmationTimeout(Duration.ofMillis(200));
 
-#+RESULTS:
-: 2
+    return Source.range(1, 10)
+        .map(number -> number.toString())
+        .map(value -> WriteMessage.create(ByteString.fromString(value)))
+        .via(AmqpFlow.createWithConfirm(settings))
+        .runWith(Sink.seq(), system)
+        .thenApply(Vector::ofAll)
+        .toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-#+BEGIN_SRC jshell
-1 + foobar
-#+END_SRC
-
-#+RESULTS:
-: |  Error:
-: |  cannot find symbol
-: |    symbol:   variable foobar
-: |  1 + foobar
-: |      ^----^
-
-
-#+BEGIN_SRC jshell
-int f() {
-  for (int i = 0; i < 5; i++) {
-    System.out.println("Hello");
-  }
-  return 42;
 }
 #+END_SRC
 
 #+RESULTS:
 
 #+BEGIN_SRC jshell
-f()
+writeToTopic()
 #+END_SRC
 
 #+RESULTS:
-: Hello
-: Hello
-: Hello
-: Hello
-: Hello
-:
-: 42
+: Vector(WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true), WriteResult(confirmed=true))
+
+*** Producer variants
+
+RabbitMQ (and its underlying AMQP protocol) allows varying degrees of consistency when producing messages.
+
+- /Fire-and-forget/ : Fastest performance, but messages may be lost in case of broker or network issues
+  + Use =AmqpFlow.apply=
+
+- /Publisher confirms/: Asynchronous message from RabbitMQ to client (after fsync)
+  + Use =AmqpFlow.withConfirm= (setting =bufferSize= to the allowed number of parallel in-flight messages)
+  + Use =AmqpFlow.withConfirmUnordered= for maximum throughput, sacrificing ordering guarantees
+
+- /Transactions/
+  + Traditionally considered "slow" by RabbitMQ
+  + Not directly supported by the Alpakka library (just use publisher confirms)
+
+*** Reading from a topic
 
 #+BEGIN_SRC jshell
-int f() {
-  foobar;
-  int bar;
-  for (int i = 0; i < 16 i++) {
-    int what;
-  }
+Seq<String> readFromTopic() throws Exception {
+    var bufferSize = 10;
+    Source<ReadResult, NotUsed> amqpSource =
+        AmqpSource.atMostOnceSource(
+            NamedQueueSourceSettings.create(AmqpLocalConnectionProvider.getInstance(), "demo-queue")
+            .withDeclaration(QueueDeclaration.create("demo-queue"))
+            .withAckRequired(false),
+            bufferSize);
+
+    return amqpSource.take(10)
+        .map(readResult -> readResult.bytes().utf8String())
+        .runWith(Sink.seq(), system)
+        .thenApply(Vector::ofAll)
+        .toCompletableFuture()
+        .get(1, TimeUnit.SECONDS);
 }
 #+END_SRC
 
 #+RESULTS:
-: |  Error:
-: |  not a statement
-: |      foobar;
-: |      ^----^
-: |  Error:
-: |  ';' expected
-: |      for (int i = 0; i < 16 i++) {
-: |                            ^
+
+#+BEGIN_SRC jshell
+readFromTopic()
+#+END_SRC
+
+#+RESULTS:
+: Vector(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+*** Consumer variants
+
+RabbitMQ (and its underlying AMQP protocol) allows varying degrees of consistency when consuming messages.
+
+- /Consumer acknowledgement/
+  + Consumers send an =ack= message to RabbitMQ to indicate that they've successfully processed a message
+  + Consumers can =ack= all messages up to the current one with one confirmation
+  + Use =AmqpSource.committableSource=, process each element, and then invoke =.ack()= on it
+    * =.mapAsync(committableReadResult -> committableReadResult.ack()=
+
+- /Automatic acknowledgement/
+  + Akka can automatically acknowledge messages as soon as they're read
+  + Use =AmqpSource.atMostOnceSource=
+
+- /Transactions/
+  + Traditionally considered "slow" by RabbitMQ
+  + Not directly supported by the Alpakka library (just use consumer acknowledgement)
