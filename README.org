@@ -1,0 +1,5 @@
+* Functional JDK 17
+
+This repository contains the [[file:presentation.org][presentation]] for Functional JDK 17.
+
+The presentation is free to use under CreativeCommons ShareAlike license. In addition, all code examples can be freely used under the [[https://mit-license.org/][MIT License]].

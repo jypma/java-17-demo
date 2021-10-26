@@ -1,6 +1,22 @@
 #+TITLE: Functional JDK 17
 #+PROPERTY: header-args:java :noeval
 #+PROPERTY: header-args:scala :noeval
+* Introduction
+** About today's presentation
+
+- /Functional JDK 17/
+  + Selection of new JDK features that fit well for functional programming
+  + Background and introduction to reactive streams
+
+- A little about me, Jan Ypma
+  + =jan@ypmania.net=
+  + Independent software developer
+  + Scala / Java, C++ (embedded), a little Rust, Lisp
+
+- This presentation
+  + [[https://github.com/jypma/java-17-demo][https://github.com/jypma/java-17-demo]]
+
+[[file:lb-logo_stort_1363x359.jpg]]
 
 * Recent new JDK features
 
@@ -48,11 +64,11 @@ var p1 = new Point(1,2)
 Use the getters:
 
 #+BEGIN_SRC jshell
-"P1 is at " + p1.x() + ", " + p1.y()
+"P1 is at somf " + p1.x() + ", " + p1.y()
 #+END_SRC
 
 #+RESULTS:
-: "P1 is at 1, 2"
+: "P1 is at somf 1, 2"
 
 Check for equality:
 
@@ -269,7 +285,20 @@ switch (nothing) {
 #+RESULTS:
 : "null!"
 
+*** Limitations
+- No decomposition
+  - Can't match nested object graphs
+#+BEGIN_SRC java
+record Drawing (Shape shape, int color)
+
+switch (myDrawing) {
+    // Does not compile:
+    case Drawing(Shape.Box box, color) ->
+}
+#+END_SRC
+
 ** Shenandoah GC and ZGC
+*** Traditional garbage collectors
 - Parallel GC
   + Stop-the-world GC for Young and Old generation
 - Concurrent Mark-Sweep GC
@@ -280,16 +309,16 @@ switch (nothing) {
   + Configurable GC pauses: either shorter pauses, or less CPU wasted on GC
   + Default since Java 9
   + Problematic on large heaps or high allocation counts
-- ZGC and Shenandoah GC
-  + Scalable, low-latency GC
-  + No generations
-  + Concurrent mark /and/ compaction
-- ZGC
+*** ZGC and Shenandoah GC
+  - Scalable, low-latency GC
+  - No generations
+  - Concurrent mark /and/ compaction
+*** ZGC
   + Since Java 11, but only on 64-bit linux (no compressed pointers)
   + Store objects in ZPages (small, medium, large), compact when almost all objects in a page are dead
   + Clever x86 JVM pointer tricks (/colored/ pointers)
   + More info on [[https://wiki.openjdk.java.net/display/ZGC][OpenJDK wiki]]
-- Shenandoah GC
+*** Shenandoah GC
   + Developed by Red Hat
   + Since Java 12 (but not in Oracle builds), but backported to 11 and 8
   + Architecture independent (windows, linux and macOS)
@@ -318,7 +347,7 @@ switch (nothing) {
 
 ** Concurrency
 
-*** Primitives
+*** Primitives vs. reactive manifesto
 
 - Threads (synchronous method calls)
   + Hard to make /responsive/ (can't really abort a thread, unless all code constantly checks time)
@@ -331,7 +360,7 @@ switch (nothing) {
   + Even harder than Threads to make /resilient/ in Java (exceptions are now hidden behind =CompletionException=, plus cancellation)
   + Can model /message-driven/ by having future callbacks
 
-- Functional effect systems
+- Functional effect systems("=CompletionStageRecipe<T,E>=")
   + Description of (not yet started) background computation
   + All of /responsive/, /elastic/ (since description can be altered before launch) and /message-driven/
   + Very active in the Scala world (=cats-effect=, =ZIO=)
@@ -444,21 +473,21 @@ ActorSystem system = ActorSystem.create("Demo")
 - Stream objects are descriptions only, and need to be /materialized/ to actually do something
 
 *** Source
-[[file:source.gif]]
+qq[[file:source.gif]]
 
 - Has a single output of type =T=, no inputs
 - Emits elements
 
 For example, a source that emits the same element every second:
 #+BEGIN_SRC jshell
-Source<String,Cancellable> everySecond = Source.tick(Duration.ofSeconds(1), Duration.ofSeconds(1), "tick!")
+Source<String, Cancellable> everySecond = Source.tick(Duration.ofSeconds(1), Duration.ofSeconds(1), "tick!")
 #+END_SRC
 
 #+RESULTS:
 
 Or a source that emits all integers up to one million, as fast as the stream can use them:
 #+BEGIN_SRC jshell
-Source<Integer,NotUsed> integers = Source.range(1, 1000000)
+Source<Integer, NotUsed> integers = Source.range(1, 1000000)
 #+END_SRC
 
 #+RESULTS:
@@ -866,3 +895,9 @@ RabbitMQ (and its underlying AMQP protocol) allows varying degrees of consistenc
 - /Transactions/
   + Traditionally considered "slow" by RabbitMQ
   + Not directly supported by the Alpakka library (just use consumer acknowledgement)
+
+* Wrapping up
+
+- Thanks for your participation!
+
+- Any final thoughts / questions?
