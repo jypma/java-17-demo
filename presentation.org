@@ -31,7 +31,7 @@ record Point(int x, int y) { }
 
 is equivalent to
 #+BEGIN_SRC java
-record Point(int x, int y) {
+class Point(int x, int y) {
     private final int x;
     private final int y;
 
@@ -66,11 +66,11 @@ var p1 = new Point(1,2)
 Use the getters:
 
 #+BEGIN_SRC jshell
-"P1 is at somf " + p1.x() + ", " + p1.y()
+"P1 is at " + p1.x() + ", " + p1.y()
 #+END_SRC
 
 #+RESULTS:
-: "P1 is at somf 1, 2"
+: "P1 is at 1, 2"
 
 Check for equality:
 
@@ -170,6 +170,9 @@ switch(value) {
 #+END_SRC
 
 #+RESULTS:
+: five
+
+
 *** Java 12: Strings, expressions
 #+BEGIN_SRC jshell
 String day = "Tuesday";
@@ -349,35 +352,6 @@ switch (myDrawing) {
 
 ** Concurrency
 
-*** Primitives vs. reactive manifesto
-
-- Threads (synchronous method calls)
-  + Hard to make /responsive/ (can't really abort a thread, unless all code constantly checks time)
-  + Hard to make /resilient/ in Java (failure is realistically limited to exceptions, of which many are unchecked and invisible)
-  + Not /message-driven/ (methods return values synchronously, and/or have side effects)
-
-- [[https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html][Futures]] (=CompletionStage<T>,= =CompletableFuture<T>,=)
-  + Handle to an on-going background computation
-  + Hard to make /responsive/ (computation already started, not cancellable in practice)
-  + Even harder than Threads to make /resilient/ in Java (exceptions are now hidden behind =CompletionException=, plus cancellation)
-  + Can model /message-driven/ by having future callbacks
-
-- Functional effect systems("=CompletionStageRecipe<T,E>=")
-  + Description of (not yet started) background computation
-  + All of /responsive/, /elastic/ (since description can be altered before launch) and /message-driven/
-  + Very active in the Scala world (=cats-effect=, =ZIO=)
-  + Not so much in plain Java or Kotlin, potentially due to missing language constructs
-
-- Reactive streams
-  + Covers a variety of independent frameworks
-    * /rxJava/ (2014), porting Microsoft's "reactive extensions" to Java
-    * /Akka Streams/ (2015), building on Akka with a component-based streaming framework
-    * /Project Reactor/ (2015), built by Spring directly decorating =java.util.concurrent.Flow=
-    * Many others
-  + Interoperability through =java.util.concurrent.Flow=
-    * Low-level
-  + We'll look at Akka Streams today
-
 *** Directness and laziness
 
 - Direct value: =Person p=
@@ -395,6 +369,45 @@ switch (myDrawing) {
   + All /Akka Streams/ types are lazy and asynchronous (but multi-valued)
   + Hence, Akka can optimize and change a stream before starting it
     * For example, adding retry behavior to stream components
+
+*** Reactive manifesto: Threads
+
+- Synchronous method calls
+  + Hard to make /responsive/ (can't really abort a thread, unless all code constantly checks time)
+  + Hard to make /resilient/ in Java (failure is realistically limited to exceptions, of which many are unchecked and invisible)
+  + Not /message-driven/ (methods return values synchronously, and/or have side effects)
+- Doesn't affect /elastic/
+
+*** Reactive manifesto: Futures
+- Java calls them [[https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html][CompletionStage]] (=CompletionStage<T>,= =CompletableFuture<T>,=)
+  + Handle to an on-going background computation
+  + Hard to make /responsive/ (computation already started, not cancellable in practice)
+  + Even harder than Threads to make /resilient/ in Java (exceptions are now hidden behind =CompletionException=, plus cancellation)
+  + Can model /message-driven/ by having future callbacks
+- Doesn't affect /elastic/
+
+*** Reactive manifesto: Functional effect systems
+- Think of  "=CompletionStageRecipe<T,E>="
+  + Description of (not yet started) background computation
+  + All of /responsive/, /elastic/ (since description can be altered before launch) and /message-driven/
+  + Very active in the Scala world (=cats-effect=, =ZIO=)
+  + Not so much in plain Java or Kotlin, potentially due to missing language constructs
+- Doesn't affect /elastic/
+
+*** Reactive manifesto: Reactive streams
+- Reactive streams
+  + Covers a variety of independent frameworks
+    * /rxJava/ (2014), porting Microsoft's "reactive extensions" to Java
+    * /Akka Streams/ (2015), building on Akka with a component-based streaming framework
+    * /Project Reactor/ (2015), built by Spring directly decorating =java.util.concurrent.Flow=
+    * Many others
+  + Interoperability through =java.util.concurrent.Flow=
+    * Low-level
+  + We'll look at Akka Streams today
+    * Trivially /responsive/ (real time is a core element of streams)
+    * /Resilient/ due to well-defined error propagation and handling
+    * Gives some /elastic/ guarantees due to bounded processing (more on that later)
+    * Integrates well in /message-driven/ architectures (native actors support)
 
 ** Immutability
 - Asynchronous processing on data needs guarantees
@@ -475,7 +488,7 @@ ActorSystem system = ActorSystem.create("Demo")
 - Stream objects are descriptions only, and need to be /materialized/ to actually do something
 
 *** Source
-qq[[file:source.gif]]
+[[file:source.gif]]
 
 - Has a single output of type =T=, no inputs
 - Emits elements
@@ -508,6 +521,7 @@ Flow<Integer,String,NotUsed> intToString = Flow.<Integer>create().
 
 #+RESULTS:
 
+*** Flow (operators)
 But we have more complex, useful operators. For example, process a sliding window of 10 elements:
 /(we'll map to VAVR's =Vector= to ensure immutability)/
 
