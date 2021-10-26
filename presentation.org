@@ -1,6 +1,8 @@
 #+TITLE: Functional JDK 17
 #+PROPERTY: header-args:java :noeval
 #+PROPERTY: header-args:scala :noeval
+#+latex_header: \hypersetup{colorlinks=true,linkcolor=blue}
+
 * Introduction
 ** About today's presentation
 
@@ -901,3 +903,30 @@ RabbitMQ (and its underlying AMQP protocol) allows varying degrees of consistenc
 - Thanks for your participation!
 
 - Any final thoughts / questions?
+
+- Curious how this presentation was made?
+  + Attend my talk at [[https://emacsconf.org/2021/][EmacsConf 2021]]
+* COMMENT Document maintainance (not presented)
+** COMMENT Export settings
+#+BEGIN_SRC elisp :exports none :results none :eval export
+(defun my/org-export-replacements (text backend info)
+  "Replace the localhost placeholder with proper production host for readers to use."
+    (with-temp-buffer
+      (insert text)
+
+      (goto-char (point-min))
+      (while (search-forward "{restclient}" nil t) (replace-match "{text}" nil t))
+
+      (goto-char (point-min))
+      (while (search-forward "{sgml}" nil t) (replace-match "{xml}" nil t))
+
+      (goto-char (point-min))
+      (while (search-forward "{jshell}" nil t) (replace-match "{java}" nil t))
+
+      (buffer-substring-no-properties (point-min) (point-max))))
+
+(make-variable-buffer-local 'org-export-filter-src-block-functions)
+
+(add-to-list 'org-export-filter-src-block-functions
+  'my/org-export-replacements)
+#+END_SRC

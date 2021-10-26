@@ -3,3 +3,5 @@
 /.settings/
 target
 /.factorypath
+/presentation.tex
+/_minted-presentation/
